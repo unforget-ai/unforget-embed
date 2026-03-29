@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "unforget-embed"
-version = "0.1.0"
-description = "Zero-config embedded Unforget server — PostgreSQL + pgvector + memory API, no setup required"
+version = "0.2.0"
+description = "Zero-config embedded Unforget server — PostgreSQL 17 + pgvector 0.8 + memory API, no setup required"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 authors = [{ name = "Unforget", email = "team@unforget.sh" }]
 dependencies = [
     "unforget[api]>=0.2.1",
-    "pgserver>=0.1.4",
+    "pgbox>=0.1.0",
     "click>=8.0",
 ]
 

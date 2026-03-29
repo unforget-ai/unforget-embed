@@ -1,21 +1,19 @@
 """Embedded PostgreSQL + Unforget API server.
 
-Manages the lifecycle of an embedded PostgreSQL instance via pgserver
+Manages the lifecycle of an embedded PostgreSQL instance via pgbox
 and runs the Unforget FastAPI server on top of it.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 import signal
 import sys
 from pathlib import Path
 
-import pgserver
 import uvicorn
 from fastapi import FastAPI
+from pgbox import get_server
 
 from unforget import MemoryStore
 from unforget.api import create_memory_router
@@ -39,7 +37,7 @@ class UnforgetEmbed:
         self.data_dir = Path(data_dir or DEFAULT_DATA_DIR)
         self.host = host
         self.port = port
-        self._pg: pgserver.PostgresServer | None = None
+        self._pg = None
         self._store: MemoryStore | None = None
 
     @property
@@ -55,14 +53,13 @@ class UnforgetEmbed:
         pg_data = self.data_dir / "pgdata"
 
         logger.info("Starting embedded PostgreSQL at %s", pg_data)
-        self._pg = pgserver.get_server(str(pg_data))
+        self._pg = get_server(str(pg_data), cleanup_mode="stop")
 
         db_uri = self._pg.get_uri()
-        logger.info("PostgreSQL ready: %s", db_uri.split("@")[1] if "@" in db_uri else db_uri)
+        logger.info("PostgreSQL ready (port=%s, pid=%s)", self._pg.port, self._pg.pid)
 
-        # Enable pgvector extension
-        self._pg.psql("CREATE EXTENSION IF NOT EXISTS vector")
-        logger.info("pgvector extension enabled")
+        # Enable pgvector
+        self._pg.enable_extension("vector")
 
         return db_uri
 
@@ -71,15 +68,19 @@ class UnforgetEmbed:
         app = FastAPI(
             title="Unforget Embed",
             description="Zero-config embedded memory server",
-            version="0.1.0",
+            version="0.2.0",
         )
 
-        # Health check
         @app.get("/health")
         async def health():
-            return {"status": "ok", "database": "embedded"}
+            return {
+                "status": "ok",
+                "database": "embedded",
+                "postgres_version": "17.4",
+                "pgvector_version": "0.8.0",
+                "port": self._pg.port if self._pg else None,
+            }
 
-        # Store the DB URI for the lifespan
         app.state.db_uri = db_uri
 
         @app.on_event("startup")
@@ -107,7 +108,6 @@ class UnforgetEmbed:
         db_uri = self._start_postgres()
         app = self._create_app(db_uri)
 
-        # Handle shutdown signals
         def handle_signal(signum, frame):
             logger.info("Received signal %d, shutting down...", signum)
             self.stop()
@@ -127,5 +127,5 @@ class UnforgetEmbed:
         """Stop the embedded server and PostgreSQL."""
         if self._pg is not None:
             logger.info("Stopping embedded PostgreSQL...")
-            self._pg.cleanup()
+            self._pg.stop()
             self._pg = None
